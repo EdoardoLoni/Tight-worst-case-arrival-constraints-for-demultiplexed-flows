@@ -1,0 +1,279 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"name":"csharp"},{"name":"fsharp","languageName":"F#","aliases":["f#","fs"]},{"name":"html","languageName":"HTML"},{"name":"http","languageName":"HTTP"},{"name":"javascript","languageName":"JavaScript","aliases":["js"]},{"name":"mermaid","languageName":"Mermaid"},{"name":"pwsh","languageName":"PowerShell","aliases":["powershell"]},{"name":"value"}]}}
+
+#!markdown
+
+**Computing tight worst-case arrival constraints for demultiplexed traffic**
+
+This notebook contains an example of implementation of the method described in the paper **Tight worst-case arrival constraints fpr demultiplexed flows**, aimed at deriving tight worst-case bounds on the temporal behavior of flows originating from the demultiplexing of an aggregate according to a given demultiplexing scheme.
+
+#!markdown
+
+> Note: at the time of writing, the first execution of the first cell yields `Error: Failed to load kernel extension`.
+>
+> However, running the cell again will not yield any error.
+
+#!csharp
+
+#r "nuget: Unipi.Nancy.Interactive, 1.0.24"
+
+#!csharp
+
+using Unipi.Nancy.Numerics;
+using Unipi.Nancy.MinPlusAlgebra;
+using Unipi.Nancy.NetworkCalculus;
+using Unipi.Nancy.Interactive;
+
+#!markdown
+
+The method *maxSpatialArrangementCurve_basic* computes the maximum spatial arrangement curve $\Omega_{M,\text{toi}}(b)$ as in Theorem 4, given $N^{\min}$ and $N^{\max}_{\text{toi}}$.
+
+#!csharp
+
+Curve maxSpatialArrangementCurve_Basic(Rational N_min, Rational N_max_toi) {
+
+    return new Curve(
+        baseSequence: new Sequence(new Element[]
+        {
+            new Point(time: 0, value: 0),
+            new Segment(startTime: 0, endTime: 2*N_max_toi, rightLimitAtStartTime:0, slope: 1),
+            new Point(2*N_max_toi, 2*N_max_toi),
+            new Segment(2*N_max_toi,  N_max_toi + N_min, 2*N_max_toi, 0)
+        }),
+        pseudoPeriodStart: N_max_toi,
+        pseudoPeriodLength: N_min,
+        pseudoPeriodHeight: N_max_toi
+    );
+}
+
+#!markdown
+
+The method *maxSpatialArrangementCurve_OffsetAware* computes the maximum spatial arrangement curve $\Omega_{M,\text{toi}}(b)$ as in Theorem 9, given $N^{\min}$, $N^{\max}_{\text{toi}}$ and the offset parameters $N^{s}_{!\text{toi}}$ and $N^{e}_{!\text{toi}}$.
+
+#!csharp
+
+Curve maxSpatialArrangementCurve_OffsetAware(Rational N_min, Rational N_max_toi, Rational N_s_non_toi, Rational N_e_non_toi) {
+
+    Rational N_min_conditioned = Rational.Max(N_min, N_max_toi + N_s_non_toi + N_e_non_toi);
+
+    return new Curve(
+        baseSequence: new Sequence(new Element[]
+        {
+            new Point(time: 0, value: 0),
+            new Segment(startTime: 0, endTime: N_max_toi, rightLimitAtStartTime:0, slope: 1),
+            new Point(N_max_toi, N_max_toi),
+            new Segment(N_max_toi,  N_max_toi + N_e_non_toi + N_s_non_toi, N_max_toi, 0),
+            new Point(N_max_toi + N_e_non_toi + N_s_non_toi, N_max_toi),
+            new Segment(N_max_toi + N_e_non_toi + N_s_non_toi, 2*N_max_toi + N_e_non_toi + N_s_non_toi, N_max_toi, 1),
+            new Point(2*N_max_toi + N_e_non_toi + N_s_non_toi, 2*N_max_toi),
+            new Segment(2*N_max_toi + N_e_non_toi + N_s_non_toi, N_max_toi + N_e_non_toi + N_min_conditioned, 2*N_max_toi, 0)
+        }),
+        pseudoPeriodStart: N_max_toi + N_e_non_toi,
+        pseudoPeriodLength: N_min_conditioned,
+        pseudoPeriodHeight: N_max_toi
+    );
+}
+
+#!markdown
+
+The method *maxQthSubsetWiseSpatialArrangementCurve* computes the $q$-th subset-wise maximum spatial arrangement curve $\Omega^{q}_{M,\text{toi}}(b)$ as in Theorem 12, given cycle parameters $N^{\min}$, $N^{\max}$ and a given number of subsets each one characterized by its triple of parameters ($N^{\max}_{\text{toi}, k}, N^{s}_{!toi, k}, n^{e}_{!toi.k}$).
+
+#!csharp
+
+Curve maxQthSubsetWiseSpatialArrangementCurve(Rational N_min, Rational[] N_max_toi_k, Rational[] N_s_non_toi_k, Rational[] N_e_non_toi_k, int q) {
+
+    Rational sum_N_max_toi = 0;
+
+    for (int i = 0; i < N_max_toi_k.Length; i++)
+        sum_N_max_toi += N_max_toi_k[i];
+
+    int n_subsets = N_max_toi_k.Length;
+
+    Rational[] gaps = new Rational[n_subsets];
+
+    for (int i = 0; i < n_subsets-1; i++) {
+        gaps[i] = N_e_non_toi_k[i] + N_s_non_toi_k[i+1];
+    }
+
+    Rational sum_gaps_to_p_minus_1 = 0;
+    Rational sum_N_max_toi_k = 0;
+
+    for (int i = 0; i < n_subsets-1; i++) {
+
+        sum_gaps_to_p_minus_1 += gaps[i];
+    }
+
+    gaps[n_subsets - 1] = N_s_non_toi_k[0] + Rational.Max(N_e_non_toi_k[n_subsets-1], N_min - sum_N_max_toi - sum_gaps_to_p_minus_1);
+
+    Rational last_gap_transient = N_s_non_toi_k[0] + N_e_non_toi_k[n_subsets-1];
+
+    Rational pseudoPeriodStart = 0;
+    Rational transientHeight = 0;
+
+    Sequence Omega_M_toi_q_seq = new Sequence(new Element[]{new Point(0,0)});
+    List<Element> Omega_M_toi_q_list = Omega_M_toi_q_seq.Elements.ToList<Element>();
+
+    Rational current_point_x = 0;
+    Rational current_point_y = 0;
+
+    for (int i = q; i < n_subsets-1; i++) {
+        //transient
+        
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + N_max_toi_k[i], current_point_y, 1)}));
+        current_point_x += N_max_toi_k[i];
+        current_point_y += N_max_toi_k[i];
+
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + gaps[i], current_point_y, 0)}));
+        
+        current_point_x += gaps[i];
+
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+    }
+
+    Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + N_max_toi_k[n_subsets-1], current_point_y, 1)}));
+    current_point_x += N_max_toi_k[n_subsets-1];
+    current_point_y += N_max_toi_k[n_subsets-1];
+
+    Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+    Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + last_gap_transient, current_point_y, 0)}));
+
+    current_point_x += last_gap_transient;
+
+    Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+
+    pseudoPeriodStart = current_point_x;
+    transientHeight = current_point_y;
+
+    for (int i = 0; i < n_subsets; i++) {
+        //pseudo_period
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + N_max_toi_k[i], current_point_y, 1)}));
+        current_point_x += N_max_toi_k[i];
+        current_point_y += N_max_toi_k[i];
+
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Segment(current_point_x, current_point_x + gaps[i], current_point_y, 0)}));
+        
+        current_point_x += gaps[i];
+
+        Omega_M_toi_q_seq = Sequence.Concat(Omega_M_toi_q_seq, new Sequence(new Element[]{new Point(current_point_x, current_point_y)}));
+    }
+
+    return new Curve(Omega_M_toi_q_seq, pseudoPeriodStart, current_point_x - pseudoPeriodStart, current_point_y - transientHeight);
+}
+
+#!markdown
+
+The method *maxSpatialArrangementCurve_SubsetAware* computes the maximum spatial arrangement curve $\Omega_{M,\text{toi}}(b)$ for the subset-aware method as in Theorem 13, by taking the maximum over all the previously computed $q$-th subset-wise spatial arrangement curves. 
+
+#!csharp
+
+Curve maxSpatialArrangementCurve_SubsetAware(Curve[] Omega_M_toi_q_subset_aware) {
+
+    return Curve.Maximum(Omega_M_toi_q_subset_aware);    
+}
+
+#!markdown
+
+The method *toiArrivalCurve* computes the arrival curve for ToI traffic by composition between the maximum spatial arrangement curve for ToI traffic and the aggregate arrival curve; this holds for each of the three versions of the method, as stated in Theorems 8, 11 and 14.
+
+#!csharp
+
+Curve toiArrivalCurve(Curve aggregateArrivalCurve, Curve maxSpatialArrangementCurve) {
+
+    return Curve.Composition(maxSpatialArrangementCurve, aggregateArrivalCurve);
+}
+
+#!markdown
+
+Numerical example.
+The following code block contains the parameter set-up; it coincides with the one listed in Section 6, Table 4
+
+#!csharp
+
+//4 subset
+//Parameter configuration
+
+Rational N_min = 15;
+Rational N_max = 25;
+
+
+//Subset-aware specific parameters
+Rational[] N_max_toi_k = new Rational[]{new Rational(25,16), new Rational(25,16), new Rational(25,16), new Rational(25,16)};
+Rational[] N_s_non_toi_k = new Rational[]{new Rational(3,1), new Rational(9,8), new Rational(5,24), new Rational(5,2)};
+Rational[] N_e_non_toi_k = new Rational[]{new Rational(3,8), new Rational(5,24), new Rational(15,4), new Rational(15,4)};
+
+Rational N_max_toi = 0;
+
+//Computing overall N_max_toi for basic method
+for (int i = 0; i < N_max_toi_k.Length; i++) {
+    N_max_toi += N_max_toi_k[i];
+}
+
+//Offset-aware specific parameters
+Rational N_s_non_toi = N_s_non_toi_k[0];
+Rational N_e_non_toi = N_e_non_toi_k[N_e_non_toi_k.Length-1]; 
+
+int n_subsets = N_max_toi_k.Length;
+
+#!markdown
+
+Aggregate arrival curve: leaky-bucket with burst equal to 15 and rate equal to 10
+
+#!csharp
+
+//Aggregate arrival curve
+var alpha = new SigmaRhoArrivalCurve(15,10);
+Plots.Plot(alpha);
+
+#!markdown
+
+Computing maximum spatial arrangement curve and ToI arrival curve using basic method
+
+#!csharp
+
+//Computing max spatial arrangement curve with basic method
+Curve Omega_M_toi_basic = maxSpatialArrangementCurve_Basic(N_min, N_max_toi);
+
+//Comuting ToI arrival curve with basic method
+Curve alpha_toi_basic = toiArrivalCurve(alpha, Omega_M_toi_basic);
+
+Plots.Plot(Omega_M_toi_basic);
+Plots.Plot(alpha_toi_basic);
+
+#!markdown
+
+Computing maximum spatial arrangement curve and ToI arrival curve using offset-aware method
+
+#!csharp
+
+//Computing max spatial arrangement curve with offset-aware method
+Curve Omega_M_toi_offsetAware = maxSpatialArrangementCurve_OffsetAware(N_min, N_max_toi, N_s_non_toi, N_e_non_toi);
+
+//Comuting ToI arrival curve with basic method
+Curve alpha_toi_offsetAware = toiArrivalCurve(alpha, Omega_M_toi_offsetAware);
+
+Plots.Plot(Omega_M_toi_offsetAware);
+Plots.Plot(alpha_toi_offsetAware);
+
+#!markdown
+
+Computing maximum spatial arrangement curve and ToI arrival curve using subset-aware method
+
+#!csharp
+
+//Computing n_subset subset-wise maximum spatial arrangement curves
+Curve[] Omega_M_toi_q_subset_aware = new Curve[n_subsets];
+
+for (int i = 0; i < n_subsets; i++)
+    Omega_M_toi_q_subset_aware[i] = maxQthSubsetWiseSpatialArrangementCurve(N_min, N_max_toi_k, N_s_non_toi_k, N_e_non_toi_k, i);
+
+//Computing maximum spatial arrangement curve for subset-aware method
+Curve Omega_M_toi_subset_aware = maxSpatialArrangementCurve_SubsetAware(Omega_M_toi_q_subset_aware);
+
+//Computing ToI arrival curve with subset-aware method
+Curve alpha_toi_subset_aware = toiArrivalCurve(alpha, Omega_M_toi_subset_aware);
+
+Plots.Plot(Omega_M_toi_subset_aware);
+Plots.Plot(alpha_toi_subset_aware);
